@@ -1,10 +1,4 @@
-#Raphael Pan & Zoom Plugin
+Forked from Juan S. Escobar Added a few improvements:
 
-This plugin enables pan and zoom functionality to a Raphael JS paper.
-It's a first version, and currently has some problems with IE < 9.
-
-I've tested it in Firefox, Chrome and Safari and it's working.
-
-
-
-Juan S. Escobar 
++ touchevents for pinching and dragging when you include hammer.js (http://eightmedia.github.com/hammer.js/)
++ extra functions for panning and zooming from within a javascript function
