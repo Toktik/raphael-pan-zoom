@@ -1,3 +1,35 @@
+// http://paulirish.com/2011/requestanimationframe-for-smart-animating/
+// http://my.opera.com/emoller/blog/2011/12/20/requestanimationframe-for-smart-er-animating
+ 
+// requestAnimationFrame polyfill by Erik Möller
+// fixes from Paul Irish and Tino Zijdel
+ 
+(function() {
+    var lastTime = 0;
+    var vendors = ['ms', 'moz', 'webkit', 'o'];
+    for(var x = 0; x < vendors.length && !window.requestAnimationFrame; ++x) {
+        window.requestAnimationFrame = window[vendors[x]+'RequestAnimationFrame'];
+        window.cancelAnimationFrame = window[vendors[x]+'CancelAnimationFrame'] 
+                                   || window[vendors[x]+'CancelRequestAnimationFrame'];
+    }
+ 
+    if (!window.requestAnimationFrame)
+        window.requestAnimationFrame = function(callback, element) {
+            var currTime = new Date().getTime();
+            var timeToCall = Math.max(0, 16 - (currTime - lastTime));
+            var id = window.setTimeout(function() { callback(currTime + timeToCall); }, 
+              timeToCall);
+            lastTime = currTime + timeToCall;
+            return id;
+        };
+ 
+    if (!window.cancelAnimationFrame)
+        window.cancelAnimationFrame = function(id) {
+            clearTimeout(id);
+        };
+}());
+
+
 /**
  * raphael.pan-zoom plugin 0.2.0
  * Copyright (c) 2012 @author Juan S. Escobar
@@ -29,6 +61,23 @@
 
         zoomOut: function (steps) {
             this.applyZoom(steps > 0 ? steps * -1 : steps);
+        },
+
+        // ADDED: custom commands i added!
+        moveLeft: function (steps) {
+            this.move(steps, 0);
+        },
+
+        moveRight: function (steps) {
+            this.move(- steps, 0);
+        },
+
+        moveUp: function (steps) {
+            this.move(0, steps);
+        },
+
+        moveDown: function (steps) {
+            this.move(0, - steps);
         },
 
         pan: function (deltaX, deltaY) {
@@ -63,16 +112,77 @@
 
         options = options || {};
 
-        settings.maxZoom = options.maxZoom || 9;
-        settings.minZoom = options.minZoom || 0;
         settings.zoomStep = options.zoomStep || 0.1;
+        settings.maxZoom = options.maxZoom || (1 / settings.zoomStep)%1 <= 0 ? (1 / settings.zoomStep) - 1 : (1 / settings.zoomStep);
+        settings.minZoom = options.minZoom || 0;
         settings.initialZoom = options.initialZoom || 0;
         settings.initialPosition = options.initialPosition || { x: 0, y: 0 };
+        settings.onRepaint = options.onRepaint || function() {}; // ADDED: make it possible to define a onRepaint callback
+        settings.gestures = options.gestures || false;
 
         this.currZoom = settings.initialZoom;
         this.currPos = settings.initialPosition;
+        this.zoomStep = settings.zoomStep // ADDED: add a public zoomStep property to the PanZoom object
 
         repaint();
+
+        if (settings.gestures && typeof Hammer === "function") {
+            var hammer = Hammer(container, {
+                'transform_min_scale': settings.zoomStep,
+                'drag_block_horizontal': true,
+                'drag_block_vertical': true,
+                'transform_always_block': true
+            });
+
+            var initialZoom, previousZoom, previousCenter;
+
+            hammer.on("touch", function(event) {
+                initialZoom = me.currZoom;
+                previousZoom = me.currZoom;
+                previousCenter = event.gesture.center;
+            });
+
+            hammer.on("release", function(event) {
+            });
+
+            var pinching = function(event) {
+                var g = event.gesture,
+                    newZoom = initialZoom * g.scale,
+                    steps = newZoom - previousZoom;
+
+                if (steps !== 0) {
+                    applyZoom(steps, getRelativePosition(g.center, container));
+                    previousZoom = newZoom;
+                }
+            };
+
+            var panning = function(event) {
+                var g = event.gesture,
+                    center = g.center,
+                    stepsX = center.pageX - previousCenter.pageX,
+                    stepsY = center.pageY - previousCenter.pageY;
+
+                if (stepsX > 0.1 || stepsY > 0.1) { // limit panning
+                    move(stepsX, stepsY);
+                }
+                previousCenter = center;
+            };
+
+            hammer.on("pinchin", function(event) {
+                pinching(event);
+                panning(event);
+            });
+
+            hammer.on("pinchout", function(event) {
+                pinching(event);
+                panning(event);
+            });
+
+            hammer.on("dragup", panning);
+            hammer.on("dragdown", panning);
+            hammer.on("dragleft", panning);
+            hammer.on("dragright", panning);
+        }
 
         container.onmousedown = function (e) {
             var evt = window.event || e;
@@ -93,6 +203,8 @@
             container.className = container.className.replace(/(?:^|\s)grabbing(?!\S)/g, '');
             container.onmousemove = null;
         };
+
+        container.onmouseout = container.onmouseup; // ADDED: cancel dragging when leaving the container
 
         if (container.attachEvent) //if IE (and Opera depending on user setting)
             container.attachEvent("on" + mousewheelevt, handleScroll);
@@ -134,13 +246,9 @@
         function dragging(e) {
             if (!me.enabled) return false;
             var evt = window.event || e,
-                newWidth = paper.width * (1 - (me.currZoom * settings.zoomStep)),
-                newHeight = paper.height * (1 - (me.currZoom * settings.zoomStep)),
                 newPoint = getRelativePosition(evt, container);
 
-            deltaX = (newWidth * (newPoint.x - initialPos.x) / paper.width) * -1;
-            deltaY = (newHeight * (newPoint.y - initialPos.y) / paper.height) * -1;
-            initialPos = newPoint;
+            updatePos(newPoint);  // ADDED: Refactored into a separate method to make it reusable       
 
             repaint();
             me.dragTime++;
@@ -149,23 +257,53 @@
             return false;
         }
 
-        function repaint() {
-            me.currPos.x = me.currPos.x + deltaX;
-            me.currPos.y = me.currPos.y + deltaY;
+        // ADDED: make it possible to move to a certain possition ... this will add a few pixels on the x or y axis
+        function move(x, y) {
+            updatePos({
+                'x': initialPos.x + (x),
+                'y': initialPos.y + (y)
+            });
 
+            repaint();
+        }
+
+        this.move = move;
+
+        // ADDED: refactored method to make it reusable
+        function updatePos(newPoint) {
             var newWidth = paper.width * (1 - (me.currZoom * settings.zoomStep)),
                 newHeight = paper.height * (1 - (me.currZoom * settings.zoomStep));
 
-            if (me.currPos.x < 0) me.currPos.x = 0;
-            else if (me.currPos.x > (paper.width * me.currZoom * settings.zoomStep)) {
-                me.currPos.x = (paper.width * me.currZoom * settings.zoomStep);
-            }
+            deltaX = (newWidth * (newPoint.x - initialPos.x) / paper.width) * -1;
+            deltaY = (newHeight * (newPoint.y - initialPos.y) / paper.height) * -1;
+            initialPos = newPoint;
+        }
 
-            if (me.currPos.y < 0) me.currPos.y = 0;
-            else if (me.currPos.y > (paper.height * me.currZoom * settings.zoomStep)) {
-                me.currPos.y = (paper.height * me.currZoom * settings.zoomStep);
-            }
-            paper.setViewBox(me.currPos.x, me.currPos.y, newWidth, newHeight);
+        function repaint() {
+            window.requestAnimationFrame(function() {
+                me.currPos.x = me.currPos.x + deltaX;
+                me.currPos.y = me.currPos.y + deltaY;
+
+                // ADDED: make sure we don't zoom to far !!
+                var currZoom = (me.currZoom * settings.zoomStep) >= 1 ? me.currZoom -1 : me.currZoom,
+                    zoomPercentage = (1 - (currZoom * settings.zoomStep)),
+                    newWidth = paper.width * zoomPercentage,
+                    newHeight = paper.height * zoomPercentage;
+
+                // make sure you don't pan too far
+                if (me.currPos.x < 0) me.currPos.x = 0;
+                else if (me.currPos.x > (paper.width - newWidth)) { // ADDED changed the if statement
+                    me.currPos.x = paper.width - newWidth;
+                }
+
+                if (me.currPos.y < 0) me.currPos.y = 0;
+                else if (me.currPos.y > (paper.height - newHeight)) { // ADDED changed the if statement
+                    me.currPos.y = paper.height - newHeight;
+                }
+
+                paper.setViewBox(me.currPos.x, me.currPos.y, newWidth, newHeight);
+                settings.onRepaint(); // ADDED call the onRepaint function
+            });
         }
     };
 
