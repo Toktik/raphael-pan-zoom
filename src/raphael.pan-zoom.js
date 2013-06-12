@@ -1,3 +1,4 @@
+
 /**
  * raphael.pan-zoom plugin 0.2.0
  * Copyright (c) 2012 @author Juan S. Escobar
@@ -77,16 +78,18 @@
         this.enabled = false;
         this.dragThreshold = 5;
         this.dragTime = 0;
+        this.repaintListeners = [];
 
         options = options || {};
 
         settings.zoomStep = options.zoomStep || 0.1;
-        settings.maxZoom = options.maxZoom || (1 / settings.zoomStep)%1 <= 0 ? (1 / settings.zoomStep) - 1 : (1 / settings.zoomStep);
-        settings.minZoom = options.minZoom || 0;
-        settings.initialZoom = options.initialZoom || 0;
+        settings.maxZoom = typeof options.maxZoom === "number" ? options.maxZoom : (1 / settings.zoomStep)%1 <= 0 ? (1 / settings.zoomStep) - 1 : (1 / settings.zoomStep);
+        settings.minZoom = typeof options.minZoom === "number" ? options.minZoom : 0;
+        settings.initialZoom = typeof options.initialZoom === "number" ? options.initialZoom : 0;
         settings.initialPosition = options.initialPosition || { x: 0, y: 0 };
-        settings.onRepaint = options.onRepaint || function() {}; // ADDED: make it possible to define a onRepaint callback
         settings.gestures = options.gestures || false;
+        settings.onPan = options.onPan || null;
+        settings.onZoom = options.onZoom || null;
 
         this.currZoom = settings.initialZoom;
         this.currPos = settings.initialPosition;
@@ -117,68 +120,65 @@
             hammer.on("release", function(event) {
             });
 
-/*
-            var $pointer = $('<div style="width: 2px; height: 2px; position: absolute; overflow: hidden; display: box; left: 10px; top: 10px; background-color: red;"></div>');
-            $('body').append($pointer);
-
-            var $pointer2 = $('<div style="width: 2px; height: 2px; position: absolute; overflow: hidden; display: box; left: 10px; top: 10px; background-color: blue;"></div>');
-            $('body').append($pointer2);
-*/
-
             var pinching = function(event) {
-                var g = event.gesture,
-                    newPercentZoom = initialPercentZoom * g.scale,
-                    newZoom = - (( 1 / newPercentZoom -1) / settings.zoomStep),
-                    steps = newZoom - previousZoom;
+                setTimeout(function() {
+                    var g = event.gesture,
+                        newPercentZoom = initialPercentZoom * g.scale,
+                        newZoom = - (( 1 / newPercentZoom -1) / settings.zoomStep),
+                        steps = newZoom - previousZoom;
 
-                if (steps !== 0) {
-                    applyZoom(steps, getRelativePosition(g.center, container));
-                    previousZoom = newZoom;
-                }
+                    if (steps !== 0) {
+                        applyZoom(steps, getRelativePosition(g.center, container));
+                        previousZoom = newZoom;
+                    }
 
-                firstPinch = false;
+                    firstPinch = false;
+                }, 1);
             };
 
             var panning = function(event, pinching) {
-                if (pinching === "undefined") {
-                    pinching = false;
-                }
+                setTimeout(function() {
+                    if (pinching === "undefined") {
+                        pinching = false;
+                    }
 
-                var g = event.gesture,
-                    center = g.center,
-                    stepsX = center.pageX - previousCenter.pageX,
-                    stepsY = center.pageY - previousCenter.pageY;
+                    var g = event.gesture,
+                        center = g.center,
+                        stepsX = center.pageX - previousCenter.pageX,
+                        stepsY = center.pageY - previousCenter.pageY;
 
-                if ((!pinching || !firstPinch) && (pinching || firstPinch)) {
-
-                    move(stepsX, stepsY);
-
-/*
-                    $pointer2.css({
-                        'left': previousCenter.pageX + 'px',
-                        'top': previousCenter.pageY + 'px'
-                    });
-
-                    $pointer.css({
-                        'left': center.pageX + 'px',
-                        'top': center.pageY + 'px'
-                    });
-*/
-                }
-                previousCenter = center;
+                    if ((!pinching || !firstPinch) && (pinching || firstPinch)) {
+                        move(stepsX, stepsY);
+                    }
+                    previousCenter = center;
+                }, 1);
             };
 
             hammer.on("pinchin", function(event) {
                 panning(event, true);
                 pinching(event);
+
+                if (event.eventType === Hammer.EVENT_END && typeof settings.onZoom === "function") {
+                    settings.onZoom(this);
+                }
             });
 
             hammer.on("pinchout", function(event) {
                 panning(event, true);
                 pinching(event);
+
+                if (event.eventType === Hammer.EVENT_END && typeof settings.onZoom === "function") {
+                    settings.onZoom(this);
+                }
             });
 
-            hammer.on("drag", panning);
+            hammer.on("drag", function(event) {
+                panning(event);
+
+                if (event.eventType === Hammer.EVENT_END && typeof settings.onPan === "function") {
+                    settings.onPan(this);
+                }
+            });
         }
 
         container.onmousedown = function (e) {
@@ -186,7 +186,7 @@
             if (!me.enabled) return false;
             me.dragTime = 0;
             initialPos = getRelativePosition(evt, container);
-            container.className += " grabbing";
+            container.style.cursor = "url(closedhand_8_8.cur) 8 8, move";
             container.onmousemove = dragging;
             document.onmousemove = function () { return false; };
             if (evt.preventDefault) evt.preventDefault();
@@ -197,11 +197,13 @@
         container.onmouseup = function (e) {
             //Remove class framework independent
             document.onmousemove = null;
-            container.className = container.className.replace(/(?:^|\s)grabbing(?!\S)/g, '');
+            container.style.cursor = "default";
             container.onmousemove = null;
-        };
 
-        container.onmouseout = container.onmouseup; // ADDED: cancel dragging when leaving the container
+            if (me.dragTime > 0 && typeof settings.onPan === "function") {
+                settings.onPan(this);
+            }
+        };
 
         if (container.attachEvent) //if IE (and Opera depending on user setting)
             container.attachEvent("on" + mousewheelevt, handleScroll);
@@ -216,19 +218,27 @@
 
             if (delta > 0) delta = -1;
             else if (delta < 0) delta = 1;
-            
+
+            document.onmousemove = function() {
+                if (typeof settings.onZoom === "function") {
+                    settings.onZoom(this);
+                }
+                document.onmousemove = null;
+            };
+
             applyZoom(delta, zoomCenter);
             if (evt.preventDefault) evt.preventDefault();
             else evt.returnValue = false;
             return false;
         }
 
-        function applyZoom(val, centerPoint) {
+        function setZoom(zoomLevel, centerPoint) {
             if (!me.enabled) return false;
             var previousZoom = me.currZoom;
 
-            me.currZoom += val;
-            if (me.currZoom < settings.minZoom) { 
+            me.currZoom = zoomLevel;
+
+            if (me.currZoom < settings.minZoom) {
                 me.currZoom = settings.minZoom;
             } else if (me.currZoom > settings.maxZoom) {
                 me.currZoom = settings.maxZoom;
@@ -236,7 +246,7 @@
 
             // correct the added value.
             val = me.currZoom - previousZoom;
-             
+
             // if no centerPoint is given ... the center point is at the center of the paper.
             // the centerPoint is a point given on the original paper width.
             centerPoint = centerPoint || { x: paper.width/2, y: paper.height/2 };
@@ -248,20 +258,52 @@
             repaint();
         }
 
+        this.setZoom = setZoom;
+
+        function applyZoom(val, centerPoint) {
+            setZoom(me.currZoom + val, centerPoint);
+        }
+
         this.applyZoom = applyZoom;
 
+        /**
+         * Transforms the given x, y coordinate from in the paper to a x, y coordinate relative to the container.
+         */
+        function getPositionRelativeToContainer(x, y) {
+            return {
+                'x': ((x - me.currPos.x) / (1 - (me.currZoom * me.zoomStep))),
+                'y': ((y - me.currPos.y) / (1 - (me.currZoom * me.zoomStep)))
+            };
+        }
+
+        this.getPositionRelativeToContainer = getPositionRelativeToContainer;
+
+        function addRepaintListener(fn) {
+            return this.repaintListeners.push(fn) - 1;
+        }
+
+        this.addRepaintListener = addRepaintListener;
+
+        function removeRepaintListener(index) {
+            this.repaintListeners.splice(index, 1);
+        }
+
+        this.removeRepaintListener = removeRepaintListener;
+
         function dragging(e) {
-            if (!me.enabled) return false;
-            var evt = window.event || e,
-                newPoint = getRelativePosition(evt, container);
+            setTimeout(function() {
+                if (!me.enabled) return false;
+                var evt = window.event || e,
+                    newPoint = getRelativePosition(evt, container);
 
-            updatePos(newPoint);
+                updatePos(newPoint);
 
-            repaint();
-            me.dragTime++;
-            if (evt.preventDefault) evt.preventDefault();
-            else evt.returnValue = false;
-            return false;
+                repaint();
+                me.dragTime++;
+                if (evt.preventDefault) evt.preventDefault();
+                else evt.returnValue = false;
+                return false;
+            }, 1);
         }
 
         /**
@@ -321,12 +363,21 @@
             }
 
             paper.setViewBox(me.currPos.x, me.currPos.y, newWidth, newHeight);
-            settings.onRepaint();
+
+            var i;
+            for (i = 0; i < me.repaintListeners.length; i++) {
+                if (typeof me.repaintListeners[i] !== "undefined") {
+                    me.repaintListeners[i](me);
+                }
+            }
         }
     };
 
     PanZoom.prototype = panZoomFunctions;
 
+    /*
+     * Returns the position of a x, y coordinate relative to given object, the given x, y coordinates are relative to the screens view port
+     */
     function getRelativePosition(e, obj) {
         var x, y, pos;
         if (e.pageX || e.pageY) {
