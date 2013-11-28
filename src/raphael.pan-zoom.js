@@ -90,6 +90,7 @@
         settings.gestures = options.gestures || false;
         settings.onPan = options.onPan || null;
         settings.onZoom = options.onZoom || null;
+        settings.panLimit = options.panLimit && true;
 
         this.currZoom = settings.initialZoom;
         this.currPos = settings.initialPosition;
@@ -352,13 +353,13 @@
                 newHeight = paper.height * zoomPercentage; // this is the new height of what's shown in the viewbox ... this get's smaller when you have a higher zoomLevel (the higher the zoomLevel, the less there is shown in the viewBox)
 
             // make sure you don't pan too far
-            if (me.currPos.x < 0) me.currPos.x = 0;
-            else if (me.currPos.x > paper.width - newWidth) { // paper.width is not allways the same to the real width and height of the svg ... maybe at custom boundaries?
+            if (me.currPos.x < 0 && settings.panLimit) me.currPos.x = 0;
+            else if (me.currPos.x > paper.width - newWidth && settings.panLimit) { // paper.width is not allways the same to the real width and height of the svg ... maybe at custom boundaries?
                 me.currPos.x = paper.width - newWidth;
             }
 
-            if (me.currPos.y < 0) me.currPos.y = 0;
-            else if (me.currPos.y > paper.height - newHeight) {
+            if (me.currPos.y < 0 && settings.panLimit) me.currPos.y = 0;
+            else if (me.currPos.y > paper.height - newHeight && settings.panLimit) {
                 me.currPos.y = paper.height - newHeight;
             }
 
