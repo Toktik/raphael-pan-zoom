@@ -90,6 +90,7 @@
         settings.gestures = options.gestures || false;
         settings.onPan = options.onPan || null;
         settings.onZoom = options.onZoom || null;
+        settings.onRepaint = options.onRepaint || null;
         settings.panLimit = options.panLimit && true;
 
         this.currZoom = settings.initialZoom;
@@ -370,6 +371,10 @@
                 if (typeof me.repaintListeners[i] !== "undefined") {
                     me.repaintListeners[i](me);
                 }
+            }
+
+            if (typeof settings.onRepaint === 'function') {
+                settings.onRepaint(currZoom);
             }
         }
     };

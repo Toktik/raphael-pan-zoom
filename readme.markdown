@@ -58,6 +58,12 @@
 
 + default : null
 
+### onRepaint(currZoom) ###
+
+Called when repaint() happens in pan-zoom.
+
++ default : null
+
 ### panLimit ###
 
 + default : true
